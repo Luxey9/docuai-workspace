@@ -24,11 +24,11 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans antialiased">
-      <AppSidebar />
+      <AppSidebar open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
 
       {/* Mobile header */}
       <header className="lg:hidden h-14 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-30 px-4 flex items-center gap-3">
-        <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="text-muted-foreground">
+        <button onClick={() => setMobileMenuOpen(true)} className="text-muted-foreground hover:text-foreground transition-smooth">
           <Menu size={22} />
         </button>
         <div className="flex items-center gap-2">
@@ -54,7 +54,7 @@ export default function Index() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: EASE }}
             >
-              <FileHeader fileName={file.name} onReset={() => setFile(null)} />
+              <FileHeader fileName={file.name} onReset={() => { setFile(null); setActiveTab("translate"); }} />
 
               <div className="mt-8">
                 <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />
