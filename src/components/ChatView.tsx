@@ -221,4 +221,7 @@ const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, re
       </div>
     </div>
   );
-}
+});
+ChatView.displayName = "ChatView";
+
+export default ChatView;
