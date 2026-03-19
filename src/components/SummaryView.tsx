@@ -1,26 +1,47 @@
 import { useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
+import { supabase } from "@/integrations/supabase/client";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
-const simulateProcess = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type Status = "idle" | "loading" | "success";
+type Status = "idle" | "loading" | "success" | "error";
 
-const summaryPoints = [
-  "Dokumen ini membahas tentang implementasi kecerdasan buatan dalam alur kerja digital modern.",
-  "Fokus utama adalah pada efisiensi pemrosesan dokumen PDF tanpa merusak struktur visual.",
-  "Metodologi yang digunakan mencakup OCR (Optical Character Recognition) tingkat lanjut.",
-  "Kesimpulan menyarankan integrasi API untuk skalabilitas bisnis yang lebih baik.",
-];
+interface SummaryViewProps {
+  documentText?: string;
+}
 
-export default function SummaryView() {
+export default function SummaryView({ documentText }: SummaryViewProps) {
   const [status, setStatus] = useState<Status>("idle");
+  const [points, setPoints] = useState<string[]>([]);
+  const [errorMsg, setErrorMsg] = useState("");
 
   const handleSummarize = async () => {
     setStatus("loading");
-    await simulateProcess(2500);
-    setStatus("success");
+    setErrorMsg("");
+
+    try {
+      const textToSummarize = documentText || "Dokumen ini belum memiliki teks yang diekstrak. Ini adalah contoh dokumen placeholder untuk pengujian fitur ringkasan AI.";
+
+      const { data, error } = await supabase.functions.invoke("summarize", {
+        body: { text: textToSummarize },
+      });
+
+      if (error) {
+        throw new Error(error.message || "Gagal meringkas dokumen");
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      setPoints(data.points || []);
+      setStatus("success");
+    } catch (e) {
+      console.error("Summarize error:", e);
+      setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
+      setStatus("error");
+    }
   };
 
   return (
@@ -38,13 +59,21 @@ export default function SummaryView() {
         </p>
       </div>
 
-      {status === "idle" && (
-        <button
-          onClick={handleSummarize}
-          className="w-full py-4 bg-foreground text-background rounded-xl font-semibold hover:opacity-90 transition-smooth"
-        >
-          Buat Ringkasan
-        </button>
+      {(status === "idle" || status === "error") && (
+        <>
+          {status === "error" && (
+            <div className="p-4 bg-destructive/10 border border-destructive/20 rounded-xl flex items-start gap-3">
+              <AlertCircle size={18} className="text-destructive shrink-0 mt-0.5" />
+              <p className="text-sm text-destructive">{errorMsg}</p>
+            </div>
+          )}
+          <button
+            onClick={handleSummarize}
+            className="w-full py-4 bg-foreground text-background rounded-xl font-semibold hover:opacity-90 transition-smooth"
+          >
+            {status === "error" ? "Coba Lagi" : "Buat Ringkasan"}
+          </button>
+        </>
       )}
 
       {status === "loading" && (
@@ -67,7 +96,7 @@ export default function SummaryView() {
           className="p-6 bg-muted rounded-2xl border border-border"
         >
           <ul className="space-y-3 text-foreground">
-            {summaryPoints.map((point, i) => (
+            {points.map((point, i) => (
               <li key={i} className="flex gap-3 text-sm leading-relaxed">
                 <ChevronRight
                   size={18}

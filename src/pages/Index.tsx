@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { LayoutDashboard, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import AppSidebar from "@/components/AppSidebar";
@@ -13,14 +13,25 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 
 export default function Index() {
   const [file, setFile] = useState<File | null>(null);
+  const [documentText, setDocumentText] = useState<string>("");
   const [activeTab, setActiveTab] = useState("translate");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
-      setFile(e.target.files[0]);
+      const uploadedFile = e.target.files[0];
+      setFile(uploadedFile);
+      
+      // Extract text from file (basic - for PDF you'd need a library)
+      try {
+        const text = await uploadedFile.text();
+        setDocumentText(text);
+      } catch {
+        // PDF files can't be read as text directly, set placeholder
+        setDocumentText(`[Dokumen PDF: ${uploadedFile.name}, ukuran: ${(uploadedFile.size / 1024).toFixed(1)}KB]`);
+      }
     }
-  };
+  }, []);
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans antialiased">
@@ -54,7 +65,7 @@ export default function Index() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: EASE }}
             >
-              <FileHeader fileName={file.name} onReset={() => { setFile(null); setActiveTab("translate"); }} />
+              <FileHeader fileName={file.name} onReset={() => { setFile(null); setDocumentText(""); setActiveTab("translate"); }} />
 
               <div className="mt-8">
                 <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />
@@ -62,8 +73,8 @@ export default function Index() {
                 <div className="mt-6 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm min-h-[400px]">
                   <AnimatePresence mode="wait">
                     {activeTab === "translate" && <TranslatorView key="t" />}
-                    {activeTab === "summary" && <SummaryView key="s" />}
-                    {activeTab === "chat" && <ChatView key="c" />}
+                    {activeTab === "summary" && <SummaryView key="s" documentText={documentText} />}
+                    {activeTab === "chat" && <ChatView key="c" documentText={documentText} />}
                   </AnimatePresence>
                 </div>
               </div>

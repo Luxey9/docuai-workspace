@@ -1,44 +1,143 @@
-import { useState } from "react";
-import { Send, Loader2 } from "lucide-react";
-
-const simulateProcess = (ms: number) => new Promise((r) => setTimeout(r, ms));
+import { useState, useRef, useEffect } from "react";
+import { Send, Loader2, AlertCircle } from "lucide-react";
 
 interface Message {
-  role: "ai" | "user";
-  text: string;
+  role: "user" | "assistant";
+  content: string;
 }
 
-const AI_RESPONSES = [
-  "Berdasarkan dokumen tersebut, informasi yang Anda cari terdapat pada halaman 4 bagian analisis data.",
-  "Dokumen ini menyebutkan bahwa tingkat akurasi OCR mencapai 98.5% untuk teks berformat standar.",
-  "Menurut kesimpulan dokumen, integrasi API direkomendasikan untuk meningkatkan skalabilitas.",
-  "Ya, dokumen ini membahas tentang kompatibilitas dengan format PDF/A dan PDF 2.0.",
-];
+const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
 
-export default function ChatView() {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "ai",
-      text: "Halo! Saya telah membaca dokumen Anda. Ada yang ingin Anda tanyakan?",
-    },
-  ]);
+interface ChatViewProps {
+  documentText?: string;
+}
+
+export default function ChatView({ documentText }: ChatViewProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages, isTyping]);
 
   const handleSend = async () => {
     if (!input.trim() || isTyping) return;
 
-    const userMsg = input;
+    const userMsg: Message = { role: "user", content: input };
+    const newMessages = [...messages, userMsg];
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", text: userMsg }]);
-
+    setMessages(newMessages);
     setIsTyping(true);
-    await simulateProcess(1500);
+    setErrorMsg("");
 
-    const aiResponse =
-      AI_RESPONSES[Math.floor(Math.random() * AI_RESPONSES.length)];
-    setMessages((prev) => [...prev, { role: "ai", text: aiResponse }]);
-    setIsTyping(false);
+    try {
+      const resp = await fetch(CHAT_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+        },
+        body: JSON.stringify({
+          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+          documentContext: documentText || undefined,
+        }),
+      });
+
+      if (!resp.ok) {
+        const errData = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        throw new Error(errData.error || `Error ${resp.status}`);
+      }
+
+      if (!resp.body) throw new Error("No response body");
+
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let textBuffer = "";
+      let assistantSoFar = "";
+      let streamDone = false;
+
+      while (!streamDone) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        textBuffer += decoder.decode(value, { stream: true });
+
+        let newlineIndex: number;
+        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
+          let line = textBuffer.slice(0, newlineIndex);
+          textBuffer = textBuffer.slice(newlineIndex + 1);
+
+          if (line.endsWith("\r")) line = line.slice(0, -1);
+          if (line.startsWith(":") || line.trim() === "") continue;
+          if (!line.startsWith("data: ")) continue;
+
+          const jsonStr = line.slice(6).trim();
+          if (jsonStr === "[DONE]") {
+            streamDone = true;
+            break;
+          }
+
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              assistantSoFar += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
+                  );
+                }
+                return [...prev, { role: "assistant", content: assistantSoFar }];
+              });
+            }
+          } catch {
+            textBuffer = line + "\n" + textBuffer;
+            break;
+          }
+        }
+      }
+
+      // Final flush
+      if (textBuffer.trim()) {
+        for (let raw of textBuffer.split("\n")) {
+          if (!raw) continue;
+          if (raw.endsWith("\r")) raw = raw.slice(0, -1);
+          if (raw.startsWith(":") || raw.trim() === "") continue;
+          if (!raw.startsWith("data: ")) continue;
+          const jsonStr = raw.slice(6).trim();
+          if (jsonStr === "[DONE]") continue;
+          try {
+            const parsed = JSON.parse(jsonStr);
+            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
+            if (content) {
+              assistantSoFar += content;
+              setMessages((prev) => {
+                const last = prev[prev.length - 1];
+                if (last?.role === "assistant") {
+                  return prev.map((m, i) =>
+                    i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
+                  );
+                }
+                return [...prev, { role: "assistant", content: assistantSoFar }];
+              });
+            }
+          } catch {
+            /* ignore partial leftovers */
+          }
+        }
+      }
+    } catch (e) {
+      console.error("Chat error:", e);
+      setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
@@ -50,24 +149,31 @@ export default function ChatView() {
         </p>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 pb-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 pb-4">
+        {messages.length === 0 && !isTyping && (
+          <div className="flex justify-start">
+            <div className="max-w-[80%] p-4 rounded-2xl rounded-tl-sm text-sm bg-muted text-foreground border border-border">
+              Halo! Saya siap membantu Anda memahami dokumen ini. Silakan ajukan pertanyaan.
+            </div>
+          </div>
+        )}
         {messages.map((msg, i) => (
           <div
             key={i}
             className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
           >
             <div
-              className={`max-w-[80%] p-4 rounded-2xl text-sm ${
+              className={`max-w-[80%] p-4 rounded-2xl text-sm whitespace-pre-wrap ${
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground rounded-tr-sm"
                   : "bg-muted text-foreground rounded-tl-sm border border-border"
               }`}
             >
-              {msg.text}
+              {msg.content}
             </div>
           </div>
         ))}
-        {isTyping && (
+        {isTyping && messages[messages.length - 1]?.role !== "assistant" && (
           <div className="flex justify-start">
             <div className="bg-muted p-4 rounded-2xl rounded-tl-sm border border-border">
               <Loader2 size={16} className="animate-spin text-muted-foreground" />
@@ -75,6 +181,13 @@ export default function ChatView() {
           </div>
         )}
       </div>
+
+      {errorMsg && (
+        <div className="pb-2 flex items-center gap-2 text-sm text-destructive">
+          <AlertCircle size={14} />
+          {errorMsg}
+        </div>
+      )}
 
       <div className="pt-4 border-t border-border flex gap-2">
         <input
@@ -86,7 +199,8 @@ export default function ChatView() {
         />
         <button
           onClick={handleSend}
-          className="w-12 h-12 bg-primary text-primary-foreground rounded-xl flex items-center justify-center hover:opacity-90 transition-smooth shadow-lg shadow-primary/20"
+          disabled={isTyping}
+          className="w-12 h-12 bg-primary text-primary-foreground rounded-xl flex items-center justify-center hover:opacity-90 transition-smooth shadow-lg shadow-primary/20 disabled:opacity-50"
         >
           <Send size={18} />
         </button>
