@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useState, forwardRef } from "react";
 import { ChevronRight, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { supabase } from "@/integrations/supabase/client";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 5000;
 
 type Status = "idle" | "loading" | "success" | "error";
 
@@ -11,36 +13,60 @@ interface SummaryViewProps {
   documentText?: string;
 }
 
-export default function SummaryView({ documentText }: SummaryViewProps) {
+const SummaryView = forwardRef<HTMLDivElement, SummaryViewProps>(({ documentText }, ref) => {
   const [status, setStatus] = useState<Status>("idle");
   const [points, setPoints] = useState<string[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
+  const [retryInfo, setRetryInfo] = useState("");
+
+  const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
   const handleSummarize = async () => {
     setStatus("loading");
     setErrorMsg("");
+    setRetryInfo("");
 
-    try {
-      const textToSummarize = documentText || "Dokumen ini belum memiliki teks yang diekstrak. Ini adalah contoh dokumen placeholder untuk pengujian fitur ringkasan AI.";
+    const textToSummarize = documentText || "Dokumen ini belum memiliki teks yang diekstrak.";
+    
+    // Truncate to ~15000 chars to avoid token limits
+    const truncated = textToSummarize.slice(0, 15000);
 
-      const { data, error } = await supabase.functions.invoke("summarize", {
-        body: { text: textToSummarize },
-      });
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const { data, error } = await supabase.functions.invoke("summarize", {
+          body: { text: truncated },
+        });
 
-      if (error) {
-        throw new Error(error.message || "Gagal meringkas dokumen");
+        if (error) {
+          // Check if it's a 429 from the response
+          if (error.message?.includes("non-2xx") && attempt < MAX_RETRIES) {
+            setRetryInfo(`Rate limit tercapai. Mencoba ulang (${attempt}/${MAX_RETRIES})...`);
+            await delay(RETRY_DELAY * attempt);
+            continue;
+          }
+          throw new Error(error.message || "Gagal meringkas dokumen");
+        }
+
+        if (data?.error) {
+          if (data.error.includes("Rate limit") && attempt < MAX_RETRIES) {
+            setRetryInfo(`Rate limit tercapai. Mencoba ulang (${attempt}/${MAX_RETRIES})...`);
+            await delay(RETRY_DELAY * attempt);
+            continue;
+          }
+          throw new Error(data.error);
+        }
+
+        setPoints(data.points || []);
+        setStatus("success");
+        setRetryInfo("");
+        return;
+      } catch (e) {
+        if (attempt === MAX_RETRIES) {
+          console.error("Summarize error:", e);
+          setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
+          setStatus("error");
+        }
       }
-
-      if (data?.error) {
-        throw new Error(data.error);
-      }
-
-      setPoints(data.points || []);
-      setStatus("success");
-    } catch (e) {
-      console.error("Summarize error:", e);
-      setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
-      setStatus("error");
     }
   };
 
