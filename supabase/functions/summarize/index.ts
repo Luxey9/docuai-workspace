@@ -72,15 +72,19 @@ serve(async (req) => {
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
 
-    // Try to parse as JSON array, fallback to splitting by newlines
+    // Try to parse as JSON array, clean markdown if needed
     let points: string[];
     try {
-      points = JSON.parse(content);
+      // Remove markdown code blocks if present
+      const cleaned = content.replace(/```json\s*/g, "").replace(/```\s*/g, "").trim();
+      points = JSON.parse(cleaned);
+      if (!Array.isArray(points)) throw new Error("Not an array");
     } catch {
       points = content
+        .replace(/```json\s*/g, "").replace(/```\s*/g, "")
         .split("\n")
-        .map((line: string) => line.replace(/^[-•*]\s*/, "").trim())
-        .filter((line: string) => line.length > 0);
+        .map((line: string) => line.replace(/^[-•*"\[\],]\s*/g, "").replace(/["\[\],]+$/g, "").trim())
+        .filter((line: string) => line.length > 3);
     }
 
     return new Response(JSON.stringify({ points }), {
