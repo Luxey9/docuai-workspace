@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import { LayoutDashboard, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { extractTextFromPDF } from "@/lib/pdfExtract";
+import { toast } from "sonner";
 import AppSidebar from "@/components/AppSidebar";
 import UploadZone from "@/components/UploadZone";
 import FileHeader from "@/components/FileHeader";
