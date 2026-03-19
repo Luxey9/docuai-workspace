@@ -37,6 +37,9 @@ const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, re
     setIsTyping(true);
     setErrorMsg("");
 
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const resp = await fetch(CHAT_URL, {
         method: "POST",
@@ -46,12 +49,18 @@ const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, re
         },
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          documentContext: documentText || undefined,
+          documentContext: documentText ? documentText.slice(0, 15000) : undefined,
         }),
       });
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        if (resp.status === 429 && attempt < MAX_RETRIES) {
+          setErrorMsg(`Rate limit tercapai. Mencoba ulang (${attempt}/${MAX_RETRIES})...`);
+          await delay(RETRY_DELAY * attempt);
+          setErrorMsg("");
+          continue;
+        }
         throw new Error(errData.error || `Error ${resp.status}`);
       }
 

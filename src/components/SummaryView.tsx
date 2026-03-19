@@ -110,7 +110,7 @@ const SummaryView = forwardRef<HTMLDivElement, SummaryViewProps>(({ documentText
           <div className="h-4 bg-muted rounded-full w-2/3 animate-pulse" />
           <div className="h-4 bg-muted rounded-full w-5/6 animate-pulse" />
           <p className="text-center text-muted-foreground text-sm mt-4">
-            Sedang membaca keseluruhan dokumen...
+            {retryInfo || "Sedang membaca keseluruhan dokumen..."}
           </p>
         </div>
       )}
