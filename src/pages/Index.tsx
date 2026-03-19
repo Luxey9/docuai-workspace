@@ -65,7 +65,7 @@ export default function Index() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: EASE }}
             >
-              <FileHeader fileName={file.name} onReset={() => { setFile(null); setActiveTab("translate"); }} />
+              <FileHeader fileName={file.name} onReset={() => { setFile(null); setDocumentText(""); setActiveTab("translate"); }} />
 
               <div className="mt-8">
                 <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />
