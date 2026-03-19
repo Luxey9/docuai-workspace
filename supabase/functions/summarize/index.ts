@@ -41,7 +41,7 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `Anda adalah asisten AI yang ahli dalam meringkas dokumen. Berikan ringkasan dalam bentuk poin-poin penting (bullet points) dalam Bahasa Indonesia. Maksimal 5-7 poin. Format sebagai JSON array of strings.`,
+            content: `Anda adalah asisten AI yang ahli dalam meringkas dokumen. Berikan ringkasan dalam bentuk poin-poin penting (bullet points) dalam Bahasa Indonesia. Maksimal 5-7 poin. PENTING: Balas HANYA dengan JSON array of strings, tanpa markdown code blocks, tanpa penjelasan tambahan. Contoh format: ["poin 1", "poin 2", "poin 3"]`,
           },
           {
             role: "user",
