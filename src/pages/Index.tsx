@@ -91,7 +91,7 @@ export default function Index() {
 
                 <div className="mt-6 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm min-h-[400px]">
                   <AnimatePresence mode="wait">
-                    {activeTab === "translate" && <TranslatorView key="t" />}
+                    {activeTab === "translate" && <TranslatorView key="t" documentText={documentText} fileName={file?.name} />}
                     {activeTab === "summary" && <SummaryView key="s" documentText={documentText} />}
                     {activeTab === "chat" && <ChatView key="c" documentText={documentText} />}
                   </AnimatePresence>
