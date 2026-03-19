@@ -1,6 +1,8 @@
 import { useState, useCallback } from "react";
 import { LayoutDashboard, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { extractTextFromPDF } from "@/lib/pdfExtract";
+import { toast } from "sonner";
 import AppSidebar from "@/components/AppSidebar";
 import UploadZone from "@/components/UploadZone";
 import FileHeader from "@/components/FileHeader";
@@ -17,18 +19,29 @@ export default function Index() {
   const [activeTab, setActiveTab] = useState("translate");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  const [extracting, setExtracting] = useState(false);
+
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       const uploadedFile = e.target.files[0];
       setFile(uploadedFile);
+      setExtracting(true);
       
-      // Extract text from file (basic - for PDF you'd need a library)
       try {
-        const text = await uploadedFile.text();
-        setDocumentText(text);
-      } catch {
-        // PDF files can't be read as text directly, set placeholder
-        setDocumentText(`[Dokumen PDF: ${uploadedFile.name}, ukuran: ${(uploadedFile.size / 1024).toFixed(1)}KB]`);
+        const text = await extractTextFromPDF(uploadedFile);
+        if (!text.trim()) {
+          toast.warning("PDF tidak mengandung teks yang bisa diekstrak (mungkin berupa gambar/scan).");
+          setDocumentText("[Dokumen PDF tidak mengandung teks yang bisa diekstrak]");
+        } else {
+          setDocumentText(text);
+          toast.success("Teks berhasil diekstrak dari PDF!");
+        }
+      } catch (err) {
+        console.error("PDF extraction error:", err);
+        toast.error("Gagal mengekstrak teks dari PDF.");
+        setDocumentText("[Gagal mengekstrak teks dari PDF]");
+      } finally {
+        setExtracting(false);
       }
     }
   }, []);
@@ -66,6 +79,12 @@ export default function Index() {
               transition={{ duration: 0.5, ease: EASE }}
             >
               <FileHeader fileName={file.name} onReset={() => { setFile(null); setDocumentText(""); setActiveTab("translate"); }} />
+
+              {extracting && (
+                <div className="mt-6 p-6 bg-card border border-border rounded-2xl text-center">
+                  <div className="animate-pulse text-muted-foreground text-sm">Mengekstrak teks dari PDF...</div>
+                </div>
+              )}
 
               <div className="mt-8">
                 <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef } from "react";
 import { Send, Loader2, AlertCircle } from "lucide-react";
 
 interface Message {
@@ -7,12 +7,14 @@ interface Message {
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 5000;
 
 interface ChatViewProps {
   documentText?: string;
 }
 
-export default function ChatView({ documentText }: ChatViewProps) {
+const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
@@ -35,6 +37,9 @@ export default function ChatView({ documentText }: ChatViewProps) {
     setIsTyping(true);
     setErrorMsg("");
 
+    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
     try {
       const resp = await fetch(CHAT_URL, {
         method: "POST",
@@ -44,12 +49,18 @@ export default function ChatView({ documentText }: ChatViewProps) {
         },
         body: JSON.stringify({
           messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          documentContext: documentText || undefined,
+          documentContext: documentText ? documentText.slice(0, 15000) : undefined,
         }),
       });
 
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+        if (resp.status === 429 && attempt < MAX_RETRIES) {
+          setErrorMsg(`Rate limit tercapai. Mencoba ulang (${attempt}/${MAX_RETRIES})...`);
+          await delay(RETRY_DELAY * attempt);
+          setErrorMsg("");
+          continue;
+        }
         throw new Error(errData.error || `Error ${resp.status}`);
       }
 
@@ -132,12 +143,16 @@ export default function ChatView({ documentText }: ChatViewProps) {
           }
         }
       }
-    } catch (e) {
-      console.error("Chat error:", e);
-      setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
-    } finally {
       setIsTyping(false);
+      return; // success
+    } catch (e) {
+      if (attempt === MAX_RETRIES) {
+        console.error("Chat error:", e);
+        setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
+        setIsTyping(false);
+      }
     }
+    } // end for
   };
 
   return (
@@ -207,4 +222,7 @@ export default function ChatView({ documentText }: ChatViewProps) {
       </div>
     </div>
   );
-}
+});
+ChatView.displayName = "ChatView";
+
+export default ChatView;
