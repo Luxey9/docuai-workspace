@@ -143,12 +143,15 @@ const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, re
           }
         }
       }
+      return; // success
     } catch (e) {
-      console.error("Chat error:", e);
-      setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
-    } finally {
-      setIsTyping(false);
+      if (attempt === MAX_RETRIES) {
+        console.error("Chat error:", e);
+        setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
+      }
     }
+    } // end for
+    setIsTyping(false);
   };
 
   return (
