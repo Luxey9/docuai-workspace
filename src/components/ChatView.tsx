@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, forwardRef } from "react";
 import { Send, Loader2, AlertCircle } from "lucide-react";
 
 interface Message {
@@ -7,12 +7,14 @@ interface Message {
 }
 
 const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 5000;
 
 interface ChatViewProps {
   documentText?: string;
 }
 
-export default function ChatView({ documentText }: ChatViewProps) {
+const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, ref) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
