@@ -80,6 +80,12 @@ export default function Index() {
             >
               <FileHeader fileName={file.name} onReset={() => { setFile(null); setDocumentText(""); setActiveTab("translate"); }} />
 
+              {extracting && (
+                <div className="mt-6 p-6 bg-card border border-border rounded-2xl text-center">
+                  <div className="animate-pulse text-muted-foreground text-sm">Mengekstrak teks dari PDF...</div>
+                </div>
+              )}
+
               <div className="mt-8">
                 <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />
 
