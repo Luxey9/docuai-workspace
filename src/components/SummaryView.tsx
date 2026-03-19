@@ -137,4 +137,7 @@ const SummaryView = forwardRef<HTMLDivElement, SummaryViewProps>(({ documentText
       )}
     </motion.div>
   );
-}
+});
+SummaryView.displayName = "SummaryView";
+
+export default SummaryView;
