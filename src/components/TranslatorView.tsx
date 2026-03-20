@@ -196,8 +196,8 @@ const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
                 onClick={handleDownload}
                 className="flex-1 flex items-center justify-center gap-2 px-8 py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-smooth"
               >
-                <Download size={18} />
-                Unduh Hasil Terjemahan
+                <FileText size={18} />
+                Unduh DOCX
               </button>
               <button
                 onClick={() => { setStatus("idle"); setTranslatedText(""); }}
