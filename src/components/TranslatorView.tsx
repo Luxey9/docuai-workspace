@@ -1,9 +1,13 @@
 import { useState, forwardRef } from "react";
-import { Loader2, CheckCircle2, Download, FileText } from "lucide-react";
+import { Loader2, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from "docx";
+import {
+  Document, Packer, Paragraph, TextRun, AlignmentType,
+  LevelFormat, PageBreak,
+} from "docx";
 import { saveAs } from "file-saver";
+import type { PDFBlock } from "@/lib/pdfExtract";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -12,10 +16,22 @@ type Status = "idle" | "loading" | "success";
 interface TranslatorViewProps {
   documentText?: string;
   fileName?: string;
+  pdfBlocks?: PDFBlock[];
+}
+
+const ALIGNMENT_MAP = {
+  left: AlignmentType.LEFT,
+  center: AlignmentType.CENTER,
+  right: AlignmentType.RIGHT,
+};
+
+function pdfFontSizeToDocx(pdfSize: number): number {
+  // pdfjs font size is roughly in points; docx uses half-points
+  return Math.round(pdfSize * 2);
 }
 
 const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
-  ({ documentText, fileName }, ref) => {
+  ({ documentText, fileName, pdfBlocks }, ref) => {
     const [status, setStatus] = useState<Status>("idle");
     const [sourceLang, setSourceLang] = useState("en");
     const [targetLang, setTargetLang] = useState("id");
@@ -59,40 +75,105 @@ const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
 
       try {
         const baseName = fileName ? fileName.replace(/\.pdf$/i, "") : "dokumen";
-        const paragraphs = translatedText.split(/\n{2,}/).filter(p => p.trim());
+        const translatedParagraphs = translatedText.split(/\n{2,}/).filter((p) => p.trim());
 
         const children: Paragraph[] = [];
+        const hasBlocks = pdfBlocks && pdfBlocks.length > 0;
 
-        paragraphs.forEach((para, idx) => {
-          const lines = para.split(/\n/).filter(l => l.trim());
-          
-          // Detect if it looks like a heading (short, no ending punctuation, or all caps)
-          const isHeading = lines.length === 1 && lines[0].length < 100 && 
-            (lines[0] === lines[0].toUpperCase() || !/[.,:;!?]$/.test(lines[0].trim()));
+        // Build numbering config for list items
+        const numberingConfig = {
+          config: [
+            {
+              reference: "bullets",
+              levels: [{
+                level: 0,
+                format: LevelFormat.BULLET,
+                text: "\u2022",
+                alignment: AlignmentType.LEFT,
+                style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+              }],
+            },
+            {
+              reference: "numbers",
+              levels: [{
+                level: 0,
+                format: LevelFormat.DECIMAL,
+                text: "%1.",
+                alignment: AlignmentType.LEFT,
+                style: { paragraph: { indent: { left: 720, hanging: 360 } } },
+              }],
+            },
+          ],
+        };
 
-          if (isHeading && idx === 0) {
-            children.push(new Paragraph({
-              children: [new TextRun({ text: lines[0].trim(), bold: true, size: 32, font: "Arial" })],
-              spacing: { after: 240 },
-              alignment: AlignmentType.CENTER,
-            }));
-          } else if (isHeading) {
-            children.push(new Paragraph({
-              children: [new TextRun({ text: lines[0].trim(), bold: true, size: 26, font: "Arial" })],
-              spacing: { before: 360, after: 120 },
-            }));
+        for (let i = 0; i < translatedParagraphs.length; i++) {
+          const text = translatedParagraphs[i].replace(/\n/g, " ").trim();
+          if (!text) continue;
+
+          // Match with original block for styling
+          const block = hasBlocks && i < pdfBlocks.length ? pdfBlocks[i] : null;
+
+          if (block) {
+            const docxSize = pdfFontSizeToDocx(block.fontSize);
+            const alignment = ALIGNMENT_MAP[block.alignment] || AlignmentType.LEFT;
+
+            // Page break
+            if (block.pageBreakBefore && children.length > 0) {
+              children.push(new Paragraph({ children: [new PageBreak()] }));
+            }
+
+            // List item
+            if (block.isListItem) {
+              // Strip bullet/number prefix from translated text
+              const cleanText = text.replace(/^[\u2022\u2023\u25E6\u2043\-•●◦▪]\s*/, "")
+                .replace(/^\d+[\.\)]\s*/, "")
+                .replace(/^[a-z][\.\)]\s*/i, "");
+
+              const isNumbered = /^\d+[\.\)]/.test(block.text.trim());
+
+              children.push(new Paragraph({
+                numbering: { reference: isNumbered ? "numbers" : "bullets", level: 0 },
+                children: [new TextRun({
+                  text: cleanText,
+                  size: docxSize,
+                  bold: block.isBold,
+                  font: "Arial",
+                })],
+                spacing: { after: 80, line: Math.round(docxSize * 14) },
+              }));
+            } else {
+              // Determine spacing based on font size (larger = more spacing)
+              const isHeading = block.fontSize > 13 || block.isBold;
+              const spacingAfter = isHeading ? 240 : 160;
+              const spacingBefore = isHeading && i > 0 ? 300 : 0;
+
+              children.push(new Paragraph({
+                children: [new TextRun({
+                  text,
+                  size: docxSize,
+                  bold: block.isBold,
+                  font: "Arial",
+                })],
+                alignment,
+                spacing: {
+                  before: spacingBefore,
+                  after: spacingAfter,
+                  line: Math.round(docxSize * 14),
+                },
+              }));
+            }
           } else {
-            // Regular paragraph - join lines
-            const text = lines.join(" ");
+            // Fallback: no block info, use sensible defaults
             children.push(new Paragraph({
               children: [new TextRun({ text, size: 24, font: "Arial" })],
               spacing: { after: 200, line: 360 },
-              alignment: AlignmentType.JUSTIFIED,
+              alignment: AlignmentType.LEFT,
             }));
           }
-        });
+        }
 
         const doc = new Document({
+          numbering: numberingConfig,
           sections: [{
             properties: {
               page: {
@@ -125,7 +206,7 @@ const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
         <div>
           <h3 className="text-lg font-semibold text-foreground">Penerjemah Presisi</h3>
           <p className="text-muted-foreground text-sm">
-            Terjemahkan dokumen Anda ke bahasa lain menggunakan AI.
+            Terjemahkan dokumen Anda ke bahasa lain dengan tata letak sesuai aslinya.
           </p>
         </div>
 
