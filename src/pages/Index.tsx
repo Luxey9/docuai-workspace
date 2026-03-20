@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import { LayoutDashboard, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { extractTextFromPDF } from "@/lib/pdfExtract";
+import { extractStructuredPDF, type PDFBlock } from "@/lib/pdfExtract";
 import { toast } from "sonner";
 import AppSidebar from "@/components/AppSidebar";
 import UploadZone from "@/components/UploadZone";
@@ -16,9 +16,9 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 export default function Index() {
   const [file, setFile] = useState<File | null>(null);
   const [documentText, setDocumentText] = useState<string>("");
+  const [pdfBlocks, setPdfBlocks] = useState<PDFBlock[]>([]);
   const [activeTab, setActiveTab] = useState("translate");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
   const [extracting, setExtracting] = useState(false);
 
   const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -26,31 +26,40 @@ export default function Index() {
       const uploadedFile = e.target.files[0];
       setFile(uploadedFile);
       setExtracting(true);
-      
+
       try {
-        const text = await extractTextFromPDF(uploadedFile);
+        const { text, blocks } = await extractStructuredPDF(uploadedFile);
         if (!text.trim()) {
           toast.warning("PDF tidak mengandung teks yang bisa diekstrak (mungkin berupa gambar/scan).");
           setDocumentText("[Dokumen PDF tidak mengandung teks yang bisa diekstrak]");
+          setPdfBlocks([]);
         } else {
           setDocumentText(text);
+          setPdfBlocks(blocks);
           toast.success("Teks berhasil diekstrak dari PDF!");
         }
       } catch (err) {
         console.error("PDF extraction error:", err);
         toast.error("Gagal mengekstrak teks dari PDF.");
         setDocumentText("[Gagal mengekstrak teks dari PDF]");
+        setPdfBlocks([]);
       } finally {
         setExtracting(false);
       }
     }
   }, []);
 
+  const handleReset = () => {
+    setFile(null);
+    setDocumentText("");
+    setPdfBlocks([]);
+    setActiveTab("translate");
+  };
+
   return (
     <div className="min-h-screen bg-background text-foreground font-sans antialiased">
       <AppSidebar open={mobileMenuOpen} onClose={() => setMobileMenuOpen(false)} />
 
-      {/* Mobile header */}
       <header className="lg:hidden h-14 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-30 px-4 flex items-center gap-3">
         <button onClick={() => setMobileMenuOpen(true)} className="text-muted-foreground hover:text-foreground transition-smooth">
           <Menu size={22} />
@@ -78,7 +87,7 @@ export default function Index() {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: EASE }}
             >
-              <FileHeader fileName={file.name} onReset={() => { setFile(null); setDocumentText(""); setActiveTab("translate"); }} />
+              <FileHeader fileName={file.name} onReset={handleReset} />
 
               {extracting && (
                 <div className="mt-6 p-6 bg-card border border-border rounded-2xl text-center">
@@ -91,7 +100,7 @@ export default function Index() {
 
                 <div className="mt-6 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm min-h-[400px]">
                   <AnimatePresence mode="wait">
-                    {activeTab === "translate" && <TranslatorView key="t" documentText={documentText} fileName={file?.name} />}
+                    {activeTab === "translate" && <TranslatorView key="t" documentText={documentText} fileName={file?.name} pdfBlocks={pdfBlocks} />}
                     {activeTab === "summary" && <SummaryView key="s" documentText={documentText} />}
                     {activeTab === "chat" && <ChatView key="c" documentText={documentText} />}
                   </AnimatePresence>
