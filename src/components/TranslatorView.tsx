@@ -1,7 +1,9 @@
 import { useState, forwardRef } from "react";
-import { Loader2, CheckCircle2, Download } from "lucide-react";
+import { Loader2, CheckCircle2, Download, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from "docx";
+import { saveAs } from "file-saver";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
