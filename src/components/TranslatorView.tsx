@@ -1,7 +1,9 @@
 import { useState, forwardRef } from "react";
-import { Loader2, CheckCircle2, Download } from "lucide-react";
+import { Loader2, CheckCircle2, Download, FileText } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel } from "docx";
+import { saveAs } from "file-saver";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
@@ -49,23 +51,66 @@ const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
       }
     };
 
-    const handleDownload = () => {
+    const handleDownload = async () => {
       if (!translatedText) {
         toast.error("Tidak ada hasil terjemahan untuk diunduh.");
         return;
       }
 
-      const blob = new Blob([translatedText], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      const baseName = fileName ? fileName.replace(/\.pdf$/i, "") : "dokumen";
-      a.download = `${baseName}_terjemahan.txt`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      toast.success("File terjemahan berhasil diunduh!");
+      try {
+        const baseName = fileName ? fileName.replace(/\.pdf$/i, "") : "dokumen";
+        const paragraphs = translatedText.split(/\n{2,}/).filter(p => p.trim());
+
+        const children: Paragraph[] = [];
+
+        paragraphs.forEach((para, idx) => {
+          const lines = para.split(/\n/).filter(l => l.trim());
+          
+          // Detect if it looks like a heading (short, no ending punctuation, or all caps)
+          const isHeading = lines.length === 1 && lines[0].length < 100 && 
+            (lines[0] === lines[0].toUpperCase() || !/[.,:;!?]$/.test(lines[0].trim()));
+
+          if (isHeading && idx === 0) {
+            children.push(new Paragraph({
+              children: [new TextRun({ text: lines[0].trim(), bold: true, size: 32, font: "Arial" })],
+              spacing: { after: 240 },
+              alignment: AlignmentType.CENTER,
+            }));
+          } else if (isHeading) {
+            children.push(new Paragraph({
+              children: [new TextRun({ text: lines[0].trim(), bold: true, size: 26, font: "Arial" })],
+              spacing: { before: 360, after: 120 },
+            }));
+          } else {
+            // Regular paragraph - join lines
+            const text = lines.join(" ");
+            children.push(new Paragraph({
+              children: [new TextRun({ text, size: 24, font: "Arial" })],
+              spacing: { after: 200, line: 360 },
+              alignment: AlignmentType.JUSTIFIED,
+            }));
+          }
+        });
+
+        const doc = new Document({
+          sections: [{
+            properties: {
+              page: {
+                size: { width: 12240, height: 15840 },
+                margin: { top: 1440, right: 1440, bottom: 1440, left: 1440 },
+              },
+            },
+            children,
+          }],
+        });
+
+        const blob = await Packer.toBlob(doc);
+        saveAs(blob, `${baseName}_terjemahan.docx`);
+        toast.success("File DOCX terjemahan berhasil diunduh!");
+      } catch (err) {
+        console.error("DOCX generation error:", err);
+        toast.error("Gagal membuat file DOCX.");
+      }
     };
 
     return (
@@ -151,8 +196,8 @@ const TranslatorView = forwardRef<HTMLDivElement, TranslatorViewProps>(
                 onClick={handleDownload}
                 className="flex-1 flex items-center justify-center gap-2 px-8 py-3 bg-primary text-primary-foreground rounded-xl font-medium hover:opacity-90 transition-smooth"
               >
-                <Download size={18} />
-                Unduh Hasil Terjemahan
+                <FileText size={18} />
+                Unduh DOCX
               </button>
               <button
                 onClick={() => { setStatus("idle"); setTranslatedText(""); }}
