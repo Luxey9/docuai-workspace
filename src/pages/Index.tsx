@@ -1,60 +1,17 @@
-import { useState, useCallback } from "react";
+import { useState } from "react";
 import { LayoutDashboard, Menu } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { extractStructuredPDF, type PDFBlock } from "@/lib/pdfExtract";
-import { toast } from "sonner";
 import AppSidebar from "@/components/AppSidebar";
 import UploadZone from "@/components/UploadZone";
 import FileHeader from "@/components/FileHeader";
-import FeatureTabs from "@/components/FeatureTabs";
-import TranslatorView from "@/components/TranslatorView";
-import SummaryView from "@/components/SummaryView";
 import ChatView from "@/components/ChatView";
+import { useFile } from "@/context/FileContext";
 
 const EASE = [0.16, 1, 0.3, 1] as const;
 
 export default function Index() {
-  const [file, setFile] = useState<File | null>(null);
-  const [documentText, setDocumentText] = useState<string>("");
-  const [pdfBlocks, setPdfBlocks] = useState<PDFBlock[]>([]);
-  const [activeTab, setActiveTab] = useState("translate");
+  const { file, resetFile } = useFile();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [extracting, setExtracting] = useState(false);
-
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) {
-      const uploadedFile = e.target.files[0];
-      setFile(uploadedFile);
-      setExtracting(true);
-
-      try {
-        const { text, blocks } = await extractStructuredPDF(uploadedFile);
-        if (!text.trim()) {
-          toast.warning("PDF tidak mengandung teks yang bisa diekstrak (mungkin berupa gambar/scan).");
-          setDocumentText("[Dokumen PDF tidak mengandung teks yang bisa diekstrak]");
-          setPdfBlocks([]);
-        } else {
-          setDocumentText(text);
-          setPdfBlocks(blocks);
-          toast.success("Teks berhasil diekstrak dari PDF!");
-        }
-      } catch (err) {
-        console.error("PDF extraction error:", err);
-        toast.error("Gagal mengekstrak teks dari PDF.");
-        setDocumentText("[Gagal mengekstrak teks dari PDF]");
-        setPdfBlocks([]);
-      } finally {
-        setExtracting(false);
-      }
-    }
-  }, []);
-
-  const handleReset = () => {
-    setFile(null);
-    setDocumentText("");
-    setPdfBlocks([]);
-    setActiveTab("translate");
-  };
 
   return (
     <div className="min-h-screen bg-background text-foreground font-sans antialiased">
@@ -74,35 +31,25 @@ export default function Index() {
 
       <main className="lg:pl-64 min-h-screen">
         <header className="hidden lg:flex h-16 border-b border-border bg-card/80 backdrop-blur-md sticky top-0 z-10 px-8 items-center justify-between">
-          <h1 className="font-semibold text-muted-foreground">Workspace Dokumen</h1>
+          <h1 className="font-semibold text-muted-foreground">Workspace Data & Analitik</h1>
           <div className="w-8 h-8 rounded-full bg-muted border border-border" />
         </header>
 
         <div className="max-w-4xl mx-auto py-8 md:py-12 px-4 md:px-6">
           {!file ? (
-            <UploadZone onUpload={handleFileUpload} />
+            <UploadZone />
           ) : (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.5, ease: EASE }}
             >
-              <FileHeader fileName={file.name} onReset={handleReset} />
-
-              {extracting && (
-                <div className="mt-6 p-6 bg-card border border-border rounded-2xl text-center">
-                  <div className="animate-pulse text-muted-foreground text-sm">Mengekstrak teks dari PDF...</div>
-                </div>
-              )}
+              <FileHeader fileName={file.name} onReset={resetFile} />
 
               <div className="mt-8">
-                <FeatureTabs activeTab={activeTab} setActiveTab={setActiveTab} />
-
                 <div className="mt-6 bg-card border border-border rounded-2xl p-6 md:p-8 shadow-sm min-h-[400px]">
                   <AnimatePresence mode="wait">
-                    {activeTab === "translate" && <TranslatorView key="t" documentText={documentText} fileName={file?.name} pdfBlocks={pdfBlocks} />}
-                    {activeTab === "summary" && <SummaryView key="s" documentText={documentText} />}
-                    {activeTab === "chat" && <ChatView key="c" documentText={documentText} />}
+                    <ChatView />
                   </AnimatePresence>
                 </div>
               </div>
