@@ -1,228 +1,158 @@
-import { useState, useRef, useEffect, forwardRef } from "react";
-import { Send, Loader2, AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { Send, Loader2, Sparkles, FileText, BarChart3 } from "lucide-react";
+import { useFile } from "../context/FileContext";
 
 interface Message {
-  role: "user" | "assistant";
-  content: string;
+  role: "ai" | "user";
+  text: string;
 }
 
-const CHAT_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/chat`;
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 5000;
-
-interface ChatViewProps {
-  documentText?: string;
-}
-
-const ChatView = forwardRef<HTMLDivElement, ChatViewProps>(({ documentText }, ref) => {
-  const [messages, setMessages] = useState<Message[]>([]);
+export default function ChatView() {
+  const { extractedText, base64Data, mimeType } = useFile();
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: "ai",
+      text: "Halo! Saya adalah AI Assistant. Anda bisa bertanya tentang dokumen yang Anda unggah, meminta ringkasan, atau analisis data.",
+    },
+  ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isTyping]);
-
-  const handleSend = async () => {
-    if (!input.trim() || isTyping) return;
-
-    const userMsg: Message = { role: "user", content: input };
-    const newMessages = [...messages, userMsg];
-    setInput("");
-    setMessages(newMessages);
-    setIsTyping(true);
-    setErrorMsg("");
-
-    const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+  const askGemini = async (userText: string) => {
     try {
-      const resp = await fetch(CHAT_URL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
+      const apiKey = import.meta.env.VITE_AI_API_KEY;
+      const model = import.meta.env.VITE_AI_MODEL || "gemini-2.5-flash";
+      
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+      let documentParts: Record<string, unknown>[] = [];
+      if (extractedText) {
+        documentParts = [{ text: `\n\n--- DOKUMEN REFERENSI ---\n${extractedText.substring(0, 150000)}\n--- AKHIR DOKUMEN ---\n` }];
+      } else if (base64Data && mimeType) {
+        documentParts = [{
+          inlineData: {
+            mimeType: mimeType,
+            data: base64Data
+          }
+        }];
+      }
+
+      const history = messages.slice(1).map((msg) => ({
+        role: msg.role === "ai" ? "model" : "user",
+        parts: [{ text: msg.text }],
+      }));
+
+      const contents = [
+        ...history,
+        {
+          role: "user",
+          parts: [
+            ...documentParts,
+            { text: userText }
+          ],
         },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          documentContext: documentText ? documentText.slice(0, 15000) : undefined,
-        }),
+      ];
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents }),
       });
 
-      if (!resp.ok) {
-        const errData = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-        if (resp.status === 429 && attempt < MAX_RETRIES) {
-          setErrorMsg(`Rate limit tercapai. Mencoba ulang (${attempt}/${MAX_RETRIES})...`);
-          await delay(RETRY_DELAY * attempt);
-          setErrorMsg("");
-          continue;
-        }
-        throw new Error(errData.error || `Error ${resp.status}`);
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error?.message || "Gagal menghubungi server Gemini");
       }
 
-      if (!resp.body) throw new Error("No response body");
-
-      const reader = resp.body.getReader();
-      const decoder = new TextDecoder();
-      let textBuffer = "";
-      let assistantSoFar = "";
-      let streamDone = false;
-
-      while (!streamDone) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        textBuffer += decoder.decode(value, { stream: true });
-
-        let newlineIndex: number;
-        while ((newlineIndex = textBuffer.indexOf("\n")) !== -1) {
-          let line = textBuffer.slice(0, newlineIndex);
-          textBuffer = textBuffer.slice(newlineIndex + 1);
-
-          if (line.endsWith("\r")) line = line.slice(0, -1);
-          if (line.startsWith(":") || line.trim() === "") continue;
-          if (!line.startsWith("data: ")) continue;
-
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === "[DONE]") {
-            streamDone = true;
-            break;
-          }
-
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) {
-              assistantSoFar += content;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
-                  );
-                }
-                return [...prev, { role: "assistant", content: assistantSoFar }];
-              });
-            }
-          } catch {
-            textBuffer = line + "\n" + textBuffer;
-            break;
-          }
-        }
-      }
-
-      // Final flush
-      if (textBuffer.trim()) {
-        for (let raw of textBuffer.split("\n")) {
-          if (!raw) continue;
-          if (raw.endsWith("\r")) raw = raw.slice(0, -1);
-          if (raw.startsWith(":") || raw.trim() === "") continue;
-          if (!raw.startsWith("data: ")) continue;
-          const jsonStr = raw.slice(6).trim();
-          if (jsonStr === "[DONE]") continue;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            const content = parsed.choices?.[0]?.delta?.content as string | undefined;
-            if (content) {
-              assistantSoFar += content;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.role === "assistant") {
-                  return prev.map((m, i) =>
-                    i === prev.length - 1 ? { ...m, content: assistantSoFar } : m
-                  );
-                }
-                return [...prev, { role: "assistant", content: assistantSoFar }];
-              });
-            }
-          } catch {
-            /* ignore partial leftovers */
-          }
-        }
-      }
-      setIsTyping(false);
-      return; // success
-    } catch (e) {
-      if (attempt === MAX_RETRIES) {
-        console.error("Chat error:", e);
-        setErrorMsg(e instanceof Error ? e.message : "Terjadi kesalahan");
-        setIsTyping(false);
-      }
+      return data.candidates[0].content.parts[0].text;
+    } catch (error: unknown) {
+      console.error("Error calling Gemini:", error);
+      return `Maaf, terjadi kesalahan: ${error instanceof Error ? error.message : "Unknown error"}`;
     }
-    } // end for
   };
 
+  const handleSend = async (text: string) => {
+    if (!text.trim() || isTyping) return;
+
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", text }]);
+    setIsTyping(true);
+    
+    const aiResponse = await askGemini(text);
+    
+    setMessages((prev) => [...prev, { role: "ai", text: aiResponse }]);
+    setIsTyping(false);
+  };
+
+  const quickPrompts = [
+    { label: "Buatkan Ringkasan", icon: <FileText size={14} />, prompt: "Tolong buatkan ringkasan yang jelas dan komprehensif dari dokumen ini." },
+    { label: "Analisis Tren Data", icon: <BarChart3 size={14} />, prompt: "Tolong analisis data ini, temukan pola, tren, atau insight penting yang ada di dalamnya." },
+    { label: "Ekstrak Poin Penting", icon: <Sparkles size={14} />, prompt: "Sebutkan poin paling penting atau temuan utama dari dokumen ini secara berurutan." },
+  ];
+
   return (
-    <div className="flex flex-col h-[450px]">
+    <div className="flex flex-col h-full min-h-[500px]">
       <div className="mb-4">
-        <h3 className="text-lg font-semibold text-foreground">Chatbot Dokumen</h3>
+        <h3 className="text-xl font-bold text-foreground">AI Analyzer & Chat</h3>
         <p className="text-muted-foreground text-sm">
-          Tanyakan apa saja berdasarkan isi dokumen ini.
+          Berkolaborasi dengan data Anda menggunakan model Gemini 2.5.
         </p>
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-4 pb-4">
-        {messages.length === 0 && !isTyping && (
-          <div className="flex justify-start">
-            <div className="max-w-[80%] p-4 rounded-2xl rounded-tl-sm text-sm bg-muted text-foreground border border-border">
-              Halo! Saya siap membantu Anda memahami dokumen ini. Silakan ajukan pertanyaan.
-            </div>
-          </div>
-        )}
+      <div className="flex-1 overflow-y-auto space-y-5 pb-4 custom-scrollbar pr-2 flex flex-col">
         {messages.map((msg, i) => (
-          <div
-            key={i}
-            className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-          >
-            <div
-              className={`max-w-[80%] p-4 rounded-2xl text-sm whitespace-pre-wrap ${
-                msg.role === "user"
-                  ? "bg-primary text-primary-foreground rounded-tr-sm"
-                  : "bg-muted text-foreground rounded-tl-sm border border-border"
-              }`}
-            >
-              {msg.content}
+          <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+            <div className={`max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
+              msg.role === "user"
+                ? "bg-primary text-primary-foreground rounded-tr-sm"
+                : "bg-muted text-foreground rounded-tl-sm border border-border shadow-sm"
+            }`}>
+              {msg.text}
             </div>
           </div>
         ))}
-        {isTyping && messages[messages.length - 1]?.role !== "assistant" && (
+
+        {messages.length === 1 && (
+          <div className="flex flex-wrap gap-2 mt-4">
+            {quickPrompts.map((q, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSend(q.prompt)}
+                className="flex items-center gap-2 bg-background border border-border hover:border-primary/50 text-foreground text-xs py-2 px-4 rounded-full transition-smooth hover:bg-muted"
+              >
+                {q.icon}
+                {q.label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {isTyping && (
           <div className="flex justify-start">
-            <div className="bg-muted p-4 rounded-2xl rounded-tl-sm border border-border">
-              <Loader2 size={16} className="animate-spin text-muted-foreground" />
+            <div className="bg-muted p-4 rounded-2xl rounded-tl-sm border border-border shadow-sm">
+              <Loader2 size={18} className="animate-spin text-primary" />
             </div>
           </div>
         )}
       </div>
 
-      {errorMsg && (
-        <div className="pb-2 flex items-center gap-2 text-sm text-destructive">
-          <AlertCircle size={14} />
-          {errorMsg}
-        </div>
-      )}
-
-      <div className="pt-4 border-t border-border flex gap-2">
+      <div className="pt-4 mt-auto border-t border-border flex gap-2">
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSend()}
-          placeholder="Tanyakan sesuatu tentang dokumen ini..."
-          className="flex-1 bg-muted border border-input rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground focus:ring-2 ring-ring outline-none transition-smooth"
+          onKeyDown={(e) => e.key === "Enter" && handleSend(input)}
+          placeholder="Tanyakan analisis atau insight spesifik..."
+          className="flex-1 bg-background border-2 border-border focus:border-primary/50 rounded-xl px-4 py-3 text-sm text-foreground placeholder:text-muted-foreground outline-none transition-smooth"
         />
         <button
-          onClick={handleSend}
-          disabled={isTyping}
-          className="w-12 h-12 bg-primary text-primary-foreground rounded-xl flex items-center justify-center hover:opacity-90 transition-smooth shadow-lg shadow-primary/20 disabled:opacity-50"
+          onClick={() => handleSend(input)}
+          disabled={!input.trim() || isTyping}
+          className="w-12 h-12 bg-primary text-primary-foreground rounded-xl flex items-center justify-center hover:opacity-90 disabled:opacity-50 transition-smooth shadow-md shadow-primary/10"
         >
           <Send size={18} />
         </button>
       </div>
     </div>
   );
-});
-ChatView.displayName = "ChatView";
-
-export default ChatView;
+}
